@@ -1,0 +1,247 @@
+/* donnan.hoc
+   copyright 1997 by N.T. Carnevale, M.L. Hines, and D.B. Jaffe
+   all rights reserved
+
+   Donnan equilibrium
+   computes ion fluxes from GHK current
+   uses forward Euler
+
+   includes graphical interface stuff from .ses file
+   version 1.2b 11/15/98 NTC
+*/
+
+
+xopen("$(NEURONHOME)/lib/hoc/noload.hoc")
+
+
+/* insurance against error messages in case someone accidentally
+   calls a function that expects to find a section
+*/
+create soma
+access soma
+{diam=10  L=10/PI} // area 100 um2 so that current density in mA/cm2
+		   // is identical to total current in nA
+
+
+// initial conditions & conductances
+K_o_0 = 100
+temp_K_o = K_o_0	// for initial value in displayed field
+min_K_o = 0.1
+
+A_i = 60
+temp_A_i = A_i	// for initial value in displayed field
+min_A_i = 0.000001
+
+
+P_K = 0.1
+P_Cl = 0.1
+variable_domain(&P_K, 0.0001, 1)
+variable_domain(&P_Cl, 0.0001, 1)
+
+
+// constants that are meant to stay constant
+// NEURON knows about R and FARADAY
+
+// constants that may be changed sometime in the future
+Vol_i = 0.1
+Vol_o = Vol_i
+Area = 100	// area of membrane
+		// adjust to make time course nice
+
+
+/* GHK membrane potential in mV
+*/
+
+func E_ghk() { local RToF, tp, bt
+   RToF = R*(celsius+273)/FARADAY
+   tp = (P_K*K_o) + (P_Cl*Cl_i)
+   bt = (P_K*K_i) + (P_Cl*Cl_o)
+   return (1000 * RToF * log(tp / bt))
+}
+
+
+/* GHK current
+   V is in mV, conc in mM, permeability in cm/s
+   result is in amperes per cm^2
+   $1 Co
+   $2 Ci
+   $3 z
+   $4 Permeability
+ */
+
+func I_ghk() { local zF, zVFoRT, ee
+   zF = $3 * FARADAY
+   // remember, Vm is in mv
+   zVFoRT = zF * (Vm/1000) / (R*(celsius+273))
+   ee = exp(-zVFoRT)
+   // one 0.001 factor converts conc from mmol / liter to mol / liter
+   // and another because P is in cm/s, while conc is per liter
+   return ((zF*zVFoRT*$4)*($2 - $1*ee)*1e-6 / (1 - ee))
+}
+
+
+proc change_anion() {
+   if (temp_A_i < min_A_i ) {
+      temp_A_i = min_A_i
+   }
+   // test temp_A_i against initial K_i (== K_o_0)
+   if (temp_A_i > K_o_0 ) {
+      temp_A_i = K_o_0
+   }
+   A_i = temp_A_i
+   init()
+}
+
+
+proc change_K_o() {
+   if (temp_K_o < min_K_o) {
+      temp_K_o = min_K_o
+   }
+   if (temp_K_o < A_i ) {
+      temp_A_i = temp_K_o
+      A_i = temp_A_i
+   }
+   K_o_0 = temp_K_o
+   init()
+}
+
+
+proc init() { local E_K, E_Cl
+   K_o = K_o_0
+   Cl_o = K_o
+
+   K_i = K_o
+   Cl_i = K_i - A_i
+
+   // calculated "constant" == total amount of K
+   K_T = (Vol_i + Vol_o) * K_o
+
+   Vm = E_ghk()
+
+   finitialize(Vm)
+   fcurrent()
+   doNotify()
+}
+
+
+// in future, use implicit Euler method
+
+proc advance() { local I, d_K
+// conc in mM, potential in mV
+
+   I = I_ghk(K_o, K_i, 1, P_K)
+   // I is in amperes/cm^2
+   // scale factor, if any, folds into ratio of area to volume
+
+   d_K = dt * I		// K efflux
+   K_i = K_i - (d_K / Vol_i)
+   K_o = K_o + (d_K / Vol_o)
+
+   // dictated by charge balance
+   Cl_i = Cl_i - (d_K / Vol_i)
+   Cl_o = K_o
+
+   Vm = E_ghk()
+
+   fadvance()
+}
+
+
+init()
+
+
+proc TSTOP_changed() {
+   tstop = TSTOP
+   tstop_changed()
+}
+
+
+// nrnmainmenu()	// for development
+
+
+objectvar save_window_, rvp_
+objectvar scene_vector_[5]
+objectvar ocbox_, ocbox_list_, scene_, scene_list_
+objref boxv,boxh
+
+{ocbox_list_ = new List()  scene_list_ = new List()}
+
+boxh = new HBox()
+boxh.intercept(1)
+
+ boxv = new VBox()
+ boxv.intercept(1)
+   {
+   xpanel("RunControl", 0)
+   xbutton("Run","run()")
+   dt = 0.5
+   steps_per_ms = 2
+   tstop = 100
+//   variable_domain(&tstop, dt, 1000)
+   TSTOP = tstop
+   variable_domain(&TSTOP, dt, 1000)
+//   xvalue("Simulation Time [s]","tstop", 1,"tstop_changed()", 0, 1 )
+   xvalue("Simulation Time (s)","TSTOP", 1,"TSTOP_changed()", 0, 1 )
+   xpanel()
+   }
+   {
+   xpanel("Parameters", 0)
+   xlabel("       PARAMETERS")
+   celsius = 25
+   xvalue("T","celsius", 1)
+   xvalue("P_K","P_K", 1)
+   xvalue("P_Cl","P_Cl", 1)
+   xvalue("Anion_i (mM)","temp_A_i", 1, "change_anion()", 0, 1)
+   xvalue("Initial K_o (mM)","temp_K_o", 1, "change_K_o()", 0, 1)
+   xpanel()
+   }
+
+   {
+   save_window_ = new Graph(0)
+   save_window_.size(0,100,-25,0)
+   scene_vector_[3] = save_window_
+   {save_window_.view(0, -25, 100, 25, 482, 598, 260, 161.298)}
+   save_window_.size(0,100,-25,0)
+   graphList[0].append(save_window_)
+   save_window_.save_name("graphList[0].")
+   save_window_.addexpr("Vm", 2, 1, 0.8, 0.2, 2)
+   }
+ boxv.intercept(0)
+ boxv.map("Run control and parameters")
+
+ boxv = new VBox()
+ boxv.intercept(1)
+   {
+   save_window_ = new Graph(0)
+   save_window_.size(0,100,-7,150)
+   scene_vector_[2] = save_window_
+   {save_window_.view(0, -7, 100, 157, 482, 52, 260, 161.298)}
+   save_window_.size(0,100,-7,150)
+   graphList[0].append(save_window_)
+   save_window_.save_name("graphList[0].")
+   save_window_.addvar("K_o", 2, 1, 0.8, 0.9, 2)
+   save_window_.addexpr("K_i", 3, 1, 0.8, 0.9, 2)
+   }
+
+   {
+   save_window_ = new Graph(0)
+   save_window_.size(0,100,-5,100)
+   scene_vector_[4] = save_window_
+   {save_window_.view(0, -5, 100, 105, 482, 325, 260, 161.298)}
+   save_window_.size(0,100,-5,100)
+   graphList[0].append(save_window_)
+   save_window_.save_name("graphList[0].")
+   save_window_.addexpr("Cl_o", 2, 1, 0.8, 0.9, 2)
+   save_window_.addexpr("Cl_i", 3, 1, 0.8, 0.9, 2)
+   }
+ boxv.intercept(0)
+ boxv.map("Output graphs")
+
+boxh.intercept(0)
+boxh.map("Gibbs-Donnan equilibrium")
+
+objectvar scene_vector_[1]
+
+{doNotify()}
+
+/* end of code */

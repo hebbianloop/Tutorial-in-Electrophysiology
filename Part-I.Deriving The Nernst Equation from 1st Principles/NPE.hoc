@@ -1,0 +1,188 @@
+/* npe.hoc
+   copyright 1997 by N.T. Carnevale, M.L. Hines, and D.B. Jaffe
+   all rights reserved
+
+   Nernst-Planck equation
+   original by DBJ
+   updated for InterViews by NTC 2/97
+
+   includes graphical interface stuff from .ses file
+   rewritten so it handles z = 0 and V = 0 properly
+   uses backwards Euler method for stability
+     regardless of size of time step
+
+   version 1.3c 1/26/99 NTC
+*/
+
+xopen("$(NEURONHOME)/lib/hoc/noload.hoc")
+
+/* insurance against error messages in case someone accidentally 
+   calls a function that expects to find a section
+*/
+create soma
+access soma
+{diam=10  L=10/PI} // area 100 um2 so that current density in mA/cm2 
+		   // is identical to total current in nA 
+
+
+// initial values of parameters
+CI_0 = 130	// hold most recently used initial values of ci & co
+CO_0 = 3
+variable_domain(&CI_0, 1e-10, 500)
+variable_domain(&CO_0, 1e-10, 500)
+z = 1		// so charge is initially +1
+
+
+// constants that are meant to stay constant
+// NEURON knows about R
+F = FARADAY
+
+// constants that may be changed sometime in the future
+Vol_i = 1
+Vol_o = Vol_i
+A = 1		// area of membrane
+P = 0.02	// permeability to diffusing species
+
+
+// globals used in advance()
+a = 0
+b = 0
+expmxi = 0
+
+
+proc init() { local xi
+	// set up in a Parameters window
+	ci = CI_0	// initial conc in mM
+	co = CO_0
+        if (z < 0) {	// force integer value
+                z = int(z - 1e-8)
+        } else {
+                z = int(z)
+        }
+
+	T=273+celsius
+
+	Vhold = v_init	// so Vhold is controllable from the Parameters window
+
+/* This version is based on my derivation of the equation for dci/dt
+(from the current density equations 2.7.18 and 2.7.19 on p. 28 of
+the first edition of Johnston & Wu) followed by setting up the 
+implicit Euler integration method.  The resulting formulas are
+
+1.  new co = old co - (new ci - old ci) * (Vol_i / Vol_o)
+
+2.  For neutral solute, 
+
+new ci * (1 + dt (a + b)) =
+	old ci * (1 + dt b) + old co * dt a
+
+where a = A P / Vol_i and b = A P / Vol_o
+
+For charged solute, 
+
+new ci * (1 + dt (a + b)) =
+	old ci * (1 + dt b) + old co * dt a exp(-xi)
+
+where
+a = (A P / Vol_i) * (xi / (1 - exp(-xi)))
+  and
+b = (A P / Vol_o) * (xi / (1 - exp(-xi))) * exp(-xi)
+  and
+xi = z V F / RT
+
+ -- NTC 
+*/
+	// neutral solute
+	a = A * P / Vol_i
+	b = A * P / Vol_o
+	expmxi = 1
+	if ((z != 0) && (Vhold != 0)) {	// charged solute in a field
+		xi = z * (Vhold/1000) * F / (R*T)
+		a = a * (xi / (1 - exp(-xi)))
+		b = b * (xi / (1 - exp(-xi))) * exp(-xi)
+		expmxi = exp(-xi)
+	}
+
+	finitialize(v_init)
+	fcurrent()
+}
+
+
+proc advance() { local new_ci
+	new_ci = (ci * (1 + (dt * b)) + co * dt * a * expmxi) /	\
+			(1 + dt * (a + b))
+	co = co - (new_ci - ci) * (Vol_i / Vol_o)
+	ci = new_ci
+	
+	fadvance()
+}
+
+
+// nrnmainmenu()	// for development
+
+
+proc TSTOP_changed() {
+	tstop = TSTOP
+	tstop_changed()
+}
+
+
+objectvar save_window_, rvp_
+objectvar scene_vector_[3]
+objectvar ocbox_, ocbox_list_, scene_, scene_list_
+objref boxv,boxh
+
+{ocbox_list_ = new List()  scene_list_ = new List()}
+
+boxh = new HBox()
+boxh.intercept(1)
+   boxv = new VBox()
+   boxv.intercept(1)
+	{
+	xpanel("RunControl", 0)
+	xbutton("Run","run()")
+	dt = 0.5
+	steps_per_ms = 1
+	tstop = 200
+//	variable_domain(&tstop, dt, 1000)
+	TSTOP = tstop
+	variable_domain(&TSTOP, dt, 1000)
+//	xvalue("Simulation Time (s)","tstop", 1,"tstop_changed()", 0, 1 )
+	xvalue("Simulation Time (s)","TSTOP", 1,"TSTOP_changed()", 0, 1 )
+	xpanel()
+	}
+	{
+	xpanel("Parameters", 0)
+	celsius = 25
+	xvalue("T","celsius", 1,"", 0, 1 )
+	v_init = 0
+	xvalue("Vm","v_init", 1,"stdinit()", 0, 1 )
+	xvalue("ci (mM)","CI_0", 1,"stdinit()", 0, 1 )
+	xvalue("co (mM)","CO_0", 1,"stdinit()", 0, 1 )
+	xvalue("z (charge)","z", 1,"stdinit()", 0, 1 )
+	xpanel()
+	}
+   boxv.intercept(0)
+   boxv.map()
+
+   {
+   save_window_ = new Graph(0)
+   save_window_.size(0,200,-5.44167,153.141)
+   scene_vector_[2] = save_window_
+   {save_window_.view(0, -5.44167, 200, 158.583, 258, 237, 295.742, 200.221)}
+   graphList[0].append(save_window_)
+   save_window_.save_name("graphList[0].")
+   save_window_.addexpr("ci", 2, 1, 0.882902, 0.362529, 2)
+   save_window_.addexpr("co", 3, 1, 0.882901, 0.362529, 2)
+   save_window_.label(0.277202, 0.850673, "Ion Concentration",    2, 1, 0, 0, 1)
+   save_window_.label(0.844438, 0.143068, "t (s)", 2, 1, 0, 0, 1)
+   save_window_.label(0.0728222, 0.931874, "[ ] (mM)", 2, 1, 0, 0, 1)
+   }
+boxh.intercept(0)
+boxh.map("Equilibrium Potential Simulation")
+
+objectvar scene_vector_[1]
+
+{doNotify()}
+
+/* end of code */

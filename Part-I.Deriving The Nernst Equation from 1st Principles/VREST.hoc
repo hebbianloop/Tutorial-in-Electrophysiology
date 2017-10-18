@@ -1,0 +1,141 @@
+/* vrest.hoc
+   copyright 1997 by N.T. Carnevale, M.L. Hines, and D.B. Jaffe
+   all rights reserved
+
+   Resting potential
+   aka GHK simulation
+   original by DBJ
+   updated for InterViews by NTC 2/97
+
+   includes graphical interface stuff from .ses file
+   version 1.3b 11/15/98 NTC
+*/
+
+xopen("$(NEURONHOME)/lib/hoc/noload.hoc")
+
+/* insurance against error messages in case someone accidentally
+   calls a function that expects to find a section
+*/
+create soma
+access soma
+{diam=10  L=10/PI} // area 100 um2 so that current density in mA/cm2
+		   // is identical to total current in nA
+
+/* Initial concentrations & permeabilities */
+
+Na_o = 124
+K_o = 3
+Cl_o = 130
+variable_domain(&Na_o, 0, 500)
+variable_domain(&K_o, 0, 500)
+variable_domain(&Cl_o, 0, 500)
+
+Na_i = 10
+K_i = 130
+Cl_i = 20
+variable_domain(&Na_i, 0, 500)
+variable_domain(&K_i, 0, 500)
+variable_domain(&Cl_i, 0, 500)
+
+P_Na = 0.0001
+P_K = 0.0001
+P_Cl = 0.0001
+variable_domain(&P_Na, 0.0001, 1.0)
+variable_domain(&P_K, 0.0001, 1.0)
+variable_domain(&P_Cl, 0.0001, 1.0)
+
+
+func E_ghk() { local RToF, tp, bt
+	RToF = 1000*R*(celsius+273)/FARADAY
+	tp = (P_Na*Na_o) + (P_K*K_o) + (P_Cl*Cl_i)
+	bt = (P_Na*Na_i) + (P_K*K_i) + (P_Cl*Cl_o)
+	return (RToF * log(tp / bt))
+}
+
+
+/*
+// a different way to show results--print them in a panel
+//   instead of showing them in a field next to a button
+
+strdef Vm_string
+Vm_string = "Membrane Potential = 000.00"
+
+proc measure() { local Vm
+	Vm = E_ghk()
+
+	sprint(Vm_string, "Membrane Potential = %.2f", Vm)
+}
+*/
+
+
+proc measure() {
+	Vm = E_ghk()
+	doNotify()
+}
+
+
+// nrnmainmenu()	// for development
+
+
+objectvar save_window_, rvp_
+objectvar scene_vector_[2]
+objectvar ocbox_, ocbox_list_, scene_, scene_list_
+objref boxv,boxh
+
+{ocbox_list_ = new List()  scene_list_ = new List()}
+
+boxv = new VBox()
+boxv.intercept(1)
+  boxh = new HBox()
+  boxh.intercept(1)
+    {
+    xpanel("Inside", 0)
+    xlabel("       INSIDE COMPARTMENT")
+    xvalue("Na_i (mM)","Na_i", 1,"measure()", 0, 1 )
+    xvalue("K_i (mM)","K_i", 1,"measure()", 0, 1 )
+    xvalue("Cl_i (mM)","Cl_i", 1,"measure()", 0, 1 )
+    xpanel()
+    }
+    {
+    xpanel("Membrane", 0)
+    xlabel("       MEMBRANE")
+    celsius = 25
+    xvalue("P_Na","P_Na", 1,"measure()", 0, 1 )
+    xvalue("P_K","P_K", 1,"measure()", 0, 1 )
+    xvalue("P_Cl","P_Cl", 1,"measure()", 0, 1 )
+    xvalue("T","celsius", 1,"measure()", 0, 1 )
+    xpanel()
+    }
+    {
+    xpanel("Outside", 0)
+    xlabel("       OUTSIDE COMPARTMENT")
+    xvalue("Na_o (mM)","Na_o", 1,"measure()", 0, 1 )
+    xvalue("K_o (mM)","K_o", 1,"measure()", 0, 1 )
+    xvalue("Cl_o (mM)","Cl_o", 1,"measure()", 0, 1 )
+    xpanel()
+    }
+  boxh.intercept(0)
+  boxh.map("Concentrations and Permeabilities")
+
+  {
+  xpanel("Membrane Potential", 0)
+  xlabel("      RESULT")
+/*
+// a different way to show results
+//   print in the panel, instead of showing in a field next to a button
+  xvarlabel(Vm_string)
+*/
+  xvalue("Vm", "Vm", 0, "measure()", 0, 1)
+  xpanel()
+  }
+boxv.intercept(0)
+boxv.map("Membrane Permeability and Resting Potential")
+
+objectvar scene_vector_[1]
+
+{doNotify()}
+
+
+measure()
+
+/* end of code */
